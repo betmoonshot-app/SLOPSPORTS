@@ -74,7 +74,15 @@ Five layers, top to bottom:
                    Launch = Discord bot. Real web app July+.
 ```
 
-**Stack**: FastAPI (async at handlers, sync where simple), Celery + Redis (task queue), PostgreSQL (primary store), React + Vite + TypeScript (Studio), Anthropic Claude API (Haiku for routing/classification, Sonnet for generation, prompt caching on persona prompts), Pillow or Satori (image card render), Railway (backend hosting), Vercel (Studio frontend).
+**Stack**: FastAPI (async at handlers, sync where simple), Celery + Redis (task queue), PostgreSQL (primary store), React + Vite + TypeScript (Studio), Anthropic Claude API (Haiku for routing/classification, Sonnet for generation, prompt caching on persona prompts), Pillow (image card render — start from MOONSHOT's `og_image.py`), Railway (backend hosting), Vercel (Studio frontend).
+
+**Cross-cutting patterns** (lifted from MOONSHOT, translated to FastAPI):
+
+- **SmartCache** (`src/lib/cache.py`) — Redis primary with in-memory fallback when Redis is unavailable. Used by Knowledge Service and ingestion. Lifted from MOONSHOT's `cache.py`.
+- **Circuit breaker** (`src/lib/circuit_breaker.py`) — opens after N failures, cooldown window, half-open trial. Wraps every external API call: Anthropic, The Odds API, X, sports feeds. The "agents go silent on Anthropic outage" policy in §10 is implemented as an open Anthropic breaker.
+- **Repository pattern** (`src/db/repositories/`) — no SQL in route handlers or Celery tasks. Routes → repositories → DB. Lifted from MOONSHOT's `server/repositories/`.
+- **Health-tracked workers** — Celery worker state surfaced at `/health` so the killswitch (§11.18) has something to read.
+- **Sentry with `/api/monitoring` tunnel** — bypasses ad-blockers, ports straight over.
 
 **Key data concepts:**
 
@@ -117,7 +125,9 @@ slopsports/
 │   ├── safety/                   # input classification, prompt-injection guard
 │   └── tasks/                    # Celery task definitions
 ├── tests/
-└── studio-web/                   # React+Vite app (later)
+└── studio-web/                   # React+Vite app (later) — lifts `apiFetch`,
+                                  # split-context architecture, Radix dialog/tooltip,
+                                  # CSP headers, and tier-gating from MOONSHOT
 ```
 
 Files in `src/prompts/` are first-class artifacts. They are the persona. Changes get reviewed like code.
@@ -154,7 +164,7 @@ Design rules:
 
 - Clean Python interface (`knowledge.get_player(...)`, `knowledge.recent_form(...)`) backed by SQLAlchemy. Plan to wrap in FastAPI later so LeagueLore can call over HTTP.
 - No persona-specific or product-specific assumptions in this module. It's a library.
-- Cache aggressively (Redis); player/team data changes slowly.
+- Cache aggressively via SmartCache (Redis with in-memory fallback); player/team data changes slowly.
 - Every return tags its source feed and timestamp, so attribution and rollback work.
 
 If a session is adding a feature here, ask: "would LeagueLore want this exact thing?" If yes, build it generically. If no, it probably belongs in `src/generation/` or `src/reaction/` instead.
@@ -214,14 +224,17 @@ python -m src.generation.cli react --agent ray --event-id <uuid>
 - **Branches**: `claude/<short-desc>-<random>` for assistant work, `feat/<desc>` for human work.
 - **Prompts**: persona prompts live in `src/prompts/*.md`, reviewed like code. Template variables use `{{var}}`.
 - **This file**: any session that makes a meaningful scope, architecture, or persona decision updates CLAUDE.md in the same session.
+- **CI**: GitHub Actions runs ruff + mypy + pytest + gitleaks on every push. Workflow lifted from MOONSHOT (`.github/workflows/ci.yml`).
+- **Deploy**: Railway via `nixpacks.toml` (force Python detection over Node — known trap from MOONSHOT). Alembic migrations auto-run on release via `Procfile`.
 
 ## 10. External services
 
 | Service | Purpose | Env var | Notes |
 |---|---|---|---|
-| Anthropic Claude API | All generation + classification | `ANTHROPIC_API_KEY` | Haiku for routing/safety, Sonnet for generation. Prompt caching on persona prompts. |
-| The Odds API | Lines, totals, market data | `ODDS_API_KEY` | Free-tier rate limits — cache 60s minimum. |
-| MLB / FIFA data | Schedules, results, stats | TBD per source | Mix of free APIs and lightweight scrapes — pick per build guide. |
+| Anthropic Claude API | All generation + classification | `ANTHROPIC_API_KEY` | Haiku for routing/safety, Sonnet for generation. Prompt caching on persona prompts. Wrapped in circuit breaker — outage = agents silent. |
+| The Odds API | Lines, totals, market data | `ODDS_API_KEY` | Free-tier rate limits — cache 60s minimum via SmartCache. Client lifted from MOONSHOT. |
+| MLB Stats API | Schedules, results, stats | none (free, no key) | Client lifted from MOONSHOT — no rework needed. |
+| FIFA / WC data | Schedules, results, stats | TBD per source | Mix of free APIs and lightweight scrapes — pick per build guide. |
 | X / Twitter API | Post + read | `X_API_KEY`, `X_API_SECRET`, `X_BEARER_TOKEN` | Dev account approval can take days — apply early. |
 | Stripe | Future paywall | `STRIPE_SECRET_KEY` | Account live; no products active at launch. |
 | Discord (bot) | Approval queue UI for launch | `DISCORD_BOT_TOKEN` | Founder approves posts from phone. |
@@ -300,7 +313,7 @@ Decisions not yet made. Add as they come up; remove when resolved (note resoluti
 1. **Free vs paid timeline.** Free everywhere first 90 days agreed. Studio paywall trigger ("at 5K followers" was the lean) needs a real spec — what's free vs paid, pricing, launch date. **Must be decided before Studio web-app build starts (target July).**
 2. **Discord launch scope.** Discord community channel comes after X traction — agreed. What ships on day one of Discord (one channel? bot-driven? agents in there?) is unspecified. **Decide before Phase 7.**
 3. **Ray's own X handle split timing.** Launch under `@SlopSportsAI`; split when justified. "Justified" needs a metric (follower count? engagement?). No deadline.
-4. **Image card visual design.** Option A (branded image card) chosen. Card template, typeface, color palette, Ray's avatar style — TBD. **Must be designed before public launch.** Budget ~3 days for render pipeline + design pass.
+4. **Image card visual design.** Option A (branded image card) chosen. Card template, typeface, color palette, Ray's avatar style — TBD. **Must be designed before public launch.** Budget ~3 days for design pass; render pipeline starts from MOONSHOT's `og_image.py` (Pillow), so engineering lift is small.
 5. **Picks Log resolution logic.** How is "was Ray right?" determined per prediction type? Game winner is easy; "over is the only sane play" is harder. Need a taxonomy of prediction shapes and how each settles. **Decide before Phase 5.**
 6. **Anti-prompt-injection classifier implementation.** Hard rule 19 is locked but the implementation isn't — Haiku classifier call, regex pre-filter, dedicated tool? **Decide before public launch.**
 7. **Sentry org structure.** Separate Sentry project per product or shared? Affects how alerts route. Low priority.
