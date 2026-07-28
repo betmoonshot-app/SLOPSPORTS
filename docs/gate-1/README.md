@@ -36,6 +36,7 @@ Nothing here is approved for production. The point of a gate is that it can fail
 | 02 | [Episode 002 Outline](02-EPISODE-002-OUTLINE.md) | Proof the format generates a second, different episode |
 | 03 | [Voice Reference](03-VOICE-REFERENCE.md) | Casting spec + audition protocol for Gate 2 |
 | 04 | [Revenue Model](04-REVENUE-MODEL.md) | Costs, time budget, three scenarios, break-even |
+| 05 | [Content Engine](05-CONTENT-ENGINE.md) | The site's written layer — columns, reaction pipeline, editorial standards, Gate 1.5 |
 
 ---
 
@@ -75,7 +76,9 @@ Three findings worth flagging:
 
 ---
 
-## Gates 2–4
+## Gates 1.5–4
+
+**Gate 1.5 — Written Format Validation.** The site launches first. Character system prompts, 10 finished posts across five columns, editorial standards, site build, publishing pipeline. Pass condition: you'd read a second post from each character, and end-to-end production takes under 40 minutes. Full detail in doc 05.
 
 **Gate 2 — Production Proof.** Voice auditions first (the protocol is in doc 03 — run it before anything else). Then the fully produced pilot, a production workflow document, and a legal risk memo. Pass condition: you listen end-to-end and think *"I'd listen to Episode 2"* — not *"that's impressive for AI."*
 
